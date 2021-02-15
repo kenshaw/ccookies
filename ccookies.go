@@ -11,11 +11,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
+	"strconv"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	sservice "github.com/zalando/go-keyring/secret_service"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -43,9 +42,14 @@ CREATE TABLE cookies(
 	UNIQUE (host_key, name, path)
 )
 */
+
 // Read reads the cookies from the provided sqlite3 file on disk.
 func Read(file, host string) ([]*http.Cookie, error) {
-	db, err := sql.Open("sqlite3", file)
+	driver := driverName()
+	if driver == "" {
+		return nil, errors.New("code using ccookies must import a sqlite driver!")
+	}
+	db, err := sql.Open(driver, file)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +74,7 @@ func Read(file, host string) ([]*http.Cookie, error) {
 		var name string
 		var encryptedValue EncryptedValue
 		var path string
-		var expiresUTC ChromeTime
+		var expiresUTC ExpiresUTC
 		var isSecure bool
 		var isHTTPOnly bool
 		// var sameSite http.SameSite
@@ -103,6 +107,49 @@ func Read(file, host string) ([]*http.Cookie, error) {
 	return cookies, nil
 }
 
+// driverName returns the first sqlite3 driver name it encounters.
+func driverName() string {
+	for _, n := range sql.Drivers() {
+		switch n {
+		case "sqlite3", "sqlite":
+			return n
+		}
+	}
+	return ""
+}
+
+// ExpiresUTC wraps a UTC based expiry time.
+type ExpiresUTC time.Time
+
+// Time returns the value as a standard time.
+func (v ExpiresUTC) Time() time.Time {
+	return time.Time(v)
+}
+
+// Scan satisfies the sql.Scanner interface.
+func (v *ExpiresUTC) Scan(z interface{}) error {
+	var i int64
+	switch x := z.(type) {
+	case int64:
+		i = x
+	case []byte:
+		var err error
+		if i, err = strconv.ParseInt(string(x), 10, 64); err != nil {
+			return err
+		}
+	case string:
+		var err error
+		if i, err = strconv.ParseInt(x, 10, 64); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported type %T", z)
+	}
+	*v = ExpiresUTC(time.Unix(0, (i*10-116444736e9)*100))
+	return nil
+}
+
+// EncryptedValue wraps an encrypted value.
 type EncryptedValue []byte
 
 // String satisfies the fmt.Stringer interface.
@@ -110,79 +157,66 @@ func (v EncryptedValue) String() string {
 	return string(v)
 }
 
+// Bytes returns the encrypted value as bytes.
+func (v EncryptedValue) Bytes() []byte {
+	return []byte(v)
+}
+
+// Scan satisfies the sql.Scanner interface.
 func (v *EncryptedValue) Scan(z interface{}) error {
 	buf, ok := z.([]byte)
 	if !ok {
-		return fmt.Errorf("encrypted value unable to scan type %T", z)
+		return fmt.Errorf("unsupported type %T", z)
 	}
 	if len(buf) <= 3 {
-		return fmt.Errorf("encrypted value has length %d (must be longer than 3)", len(buf))
+		return fmt.Errorf("length %d <= 3", len(buf))
 	}
-	typ := string(buf[0:3])
-	var password []byte
+	ver := string(buf[0:3])
+	var secret []byte
 	switch {
-	case typ == "v11":
+	case ver == "v11":
 		var err error
-		password, err = readAppSecret("chrome")
+		secret, err = appSecret("chrome")
 		if err != nil {
 			return err
 		}
 	default:
-		log.Printf("fuck")
-		password = []byte("peanuts")
+		secret = []byte("peanuts")
 	}
 	var err error
-	*v, err = decryptAESCBC(buf, password, aescbcIterationsLinux)
+	*v, err = aesDecrypt(buf[3:], secret)
 	return err
 }
 
-// ChromeTime wraps a chrome time.
-type ChromeTime int64
-
-func (v ChromeTime) Time() time.Time {
-	i := int64(v) * 10
-	i -= 116444736e9
-	return time.Unix(0, i*100)
-}
-
-func decryptAESCBC(encrypted, password []byte, iterations int) ([]byte, error) {
-	if len(encrypted) == 0 {
-		return nil, errors.New("empty encrypted value")
+// aesDecrypt decrypts the encrypted bytes using specified secret.
+func aesDecrypt(enc, secret []byte) ([]byte, error) {
+	if len(enc)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("length % %d != 0", aes.BlockSize)
 	}
-	if len(encrypted) <= 3 {
-		return nil, fmt.Errorf("too short encrypted value (%d<=3)", len(encrypted))
-	}
-	// strip "v##"
-	encrypted = encrypted[3:]
-	key := pbkdf2.Key(password, []byte(aescbcSalt), iterations, aescbcLength, sha1.New)
-	block, err := aes.NewCipher(key)
+	salt, iv, iterations := aesConfig()
+	block, err := aes.NewCipher(
+		pbkdf2.Key(secret, salt, iterations, aes.BlockSize, sha1.New),
+	)
 	if err != nil {
 		return nil, err
 	}
-	decrypted := make([]byte, len(encrypted))
-	cbc := cipher.NewCBCDecrypter(block, []byte(aescbcIV))
-	cbc.CryptBlocks(decrypted, encrypted)
-	// In the padding scheme the last <padding length> bytes
-	// have a value equal to the padding length, always in (1,16]
-	if len(decrypted)%aescbcLength != 0 {
-		return nil, fmt.Errorf("decrypted data block length is not a multiple of %d", aescbcLength)
+	dec := make([]byte, len(enc))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(dec, enc)
+	// chop padding
+	padding := int(dec[len(dec)-1])
+	if padding > 16 {
+		return nil, fmt.Errorf("invalid padding: %d", padding)
 	}
-	paddingLen := int(decrypted[len(decrypted)-1])
-	if paddingLen > 16 {
-		return nil, fmt.Errorf("invalid last block padding length: %d", paddingLen)
-	}
-	return decrypted[:len(decrypted)-paddingLen], nil
+	return dec[:len(dec)-padding], nil
 }
 
-const (
-	aescbcSalt            = `saltysalt`
-	aescbcIV              = `                `
-	aescbcIterationsLinux = 1
-	// aescbcIterationsMacOS = 1003
-	aescbcLength = 16
-)
+// aesConfig returns the salt, iv, and iterations for aes decryption.
+func aesConfig() ([]byte, []byte, int) {
+	return []byte(`saltysalt`), []byte(`                `), 1
+}
 
-func readAppSecret(app string) ([]byte, error) {
+// appSecret reads the specified app secret from the system's keyring.
+func appSecret(app string) ([]byte, error) {
 	svc, err := sservice.NewSecretService()
 	if err != nil {
 		return nil, err
@@ -191,23 +225,22 @@ func readAppSecret(app string) ([]byte, error) {
 	if err := svc.Unlock(collection.Path()); err != nil {
 		return nil, err
 	}
-	results, err := svc.SearchItems(collection, map[string]string{
+	res, err := svc.SearchItems(collection, map[string]string{
 		"application": app,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if len(results) == 0 {
+	if len(res) == 0 {
 		return nil, fmt.Errorf("application %q secret not found in keyring", app)
 	}
-	item := results[0]
 	// open a session
-	session, err := svc.OpenSession()
+	sess, err := svc.OpenSession()
 	if err != nil {
 		return nil, err
 	}
-	defer svc.Close(session)
-	secret, err := svc.GetSecret(item, session.Path())
+	defer svc.Close(sess)
+	secret, err := svc.GetSecret(res[0], sess.Path())
 	if err != nil {
 		return nil, err
 	}
