@@ -1,16 +1,37 @@
 package models
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha1"
 	"fmt"
+	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	sservice "github.com/zalando/go-keyring/secret_service"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+// Convert converts a slice of Cookie to http.Cookie.
+func Convert(res []*Cookie) []*http.Cookie {
+	var cookies []*http.Cookie
+	for _, c := range res {
+		cookies = append(cookies, &http.Cookie{
+			Name:     c.Name,
+			Value:    c.EncryptedValue.String(),
+			Path:     c.Path,
+			Domain:   c.HostKey,
+			Expires:  c.ExpiresUTC.Time(),
+			Secure:   c.IsSecure,
+			HttpOnly: c.IsHTTPOnly,
+			// SameSite: c.SameSite,
+		})
+	}
+	return cookies
+}
 
 // ExpiresUTC wraps a UTC based expiry time.
 type ExpiresUTC time.Time
@@ -59,33 +80,38 @@ func (v EncryptedValue) Bytes() []byte {
 // Scan satisfies the sql.Scanner interface.
 func (v *EncryptedValue) Scan(z interface{}) error {
 	buf, ok := z.([]byte)
-	if !ok {
+	switch {
+	case !ok:
 		return fmt.Errorf("unsupported type %T", z)
-	}
-	if len(buf) <= 3 {
+	case len(buf) == 0:
+		return nil
+	case len(buf) <= 3:
 		return fmt.Errorf("length %d <= 3", len(buf))
 	}
-	ver := string(buf[0:3])
-	var secret []byte
-	switch {
-	case ver == "v11":
+	// determine secret
+	secret := defaultSecret
+	if bytes.HasPrefix(buf, v11) {
 		var err error
-		secret, err = appSecret("chrome")
-		if err != nil {
+		if secret, err = appSecret("chrome"); err != nil {
 			return err
 		}
-	default:
-		secret = []byte("peanuts")
 	}
+	// decrypt
 	var err error
 	*v, err = aesDecrypt(buf[3:], secret)
 	return err
 }
 
-// aesDecrypt decrypts the encrypted bytes using specified secret.
+// v11 is the v11 prefix.
+var v11 = []byte("v11")
+
+// defaultSecret is the default secret.
+var defaultSecret = []byte("peanuts")
+
+// aesDecrypt decrypts the encrypted bytes using the specified secret.
 func aesDecrypt(enc, secret []byte) ([]byte, error) {
 	if len(enc)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("length % %d != 0", aes.BlockSize)
+		return nil, fmt.Errorf("length %% %d != 0", aes.BlockSize)
 	}
 	salt, iv, iterations := aesConfig()
 	block, err := aes.NewCipher(
@@ -109,8 +135,29 @@ func aesConfig() ([]byte, []byte, int) {
 	return []byte(`saltysalt`), []byte(`                `), 1
 }
 
-// appSecret reads the specified app secret from the system's keyring.
+// appSecret returns the secret for the specified app from the secret cache or
+// from the system.
 func appSecret(app string) ([]byte, error) {
+	systemSecrets.Lock()
+	defer systemSecrets.Unlock()
+	// check for cached secret
+	if secret, ok := systemSecrets.secrets[app]; ok {
+		return secret, nil
+	}
+	// read system secret
+	secret, err := readSystemSecret(app)
+	if err != nil {
+		return nil, err
+	}
+	// cache
+	systemSecrets.secrets[app] = secret
+	return secret, nil
+}
+
+// readSystemSecret reads the secret for the specified app from the system's
+// keyring.
+func readSystemSecret(app string) ([]byte, error) {
+	// open service and user's secrets collection
 	svc, err := sservice.NewSecretService()
 	if err != nil {
 		return nil, err
@@ -119,24 +166,35 @@ func appSecret(app string) ([]byte, error) {
 	if err := svc.Unlock(collection.Path()); err != nil {
 		return nil, err
 	}
+	// get app secret from collection
 	res, err := svc.SearchItems(collection, map[string]string{
 		"application": app,
 	})
-	if err != nil {
+	// check secret was found
+	switch {
+	case err != nil:
 		return nil, err
-	}
-	if len(res) == 0 {
+	case len(res) == 0:
 		return nil, fmt.Errorf("application %q secret not found in keyring", app)
 	}
-	// open a session
+	// open session
 	sess, err := svc.OpenSession()
 	if err != nil {
 		return nil, err
 	}
 	defer svc.Close(sess)
+	// retrieve secret
 	secret, err := svc.GetSecret(res[0], sess.Path())
 	if err != nil {
 		return nil, err
 	}
 	return secret.Value, nil
+}
+
+// systemSecrets are cached system secrets.
+var systemSecrets = struct {
+	secrets map[string][]byte
+	sync.Mutex
+}{
+	secrets: make(map[string][]byte),
 }

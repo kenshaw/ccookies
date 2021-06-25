@@ -264,8 +264,8 @@ func Cookies(ctx context.Context, db DB, host string) ([]*Cookie, error) {
 	return res, nil
 }
 
-// CookiesByHost retrieves cookies by host.
-func CookiesByHost(ctx context.Context, db DB, host string) ([]*Cookie, error) {
+// CookiesLikeHost retrieves cookies like the host.
+func CookiesLikeHost(ctx context.Context, db DB, host string) ([]*Cookie, error) {
 	// query
 	const sqlstr = `SELECT ` +
 		`host_key, ` +

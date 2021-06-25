@@ -33,10 +33,10 @@ SELECT
 FROM cookies
 ENDSQL
 
-FUNC_COMMENT='{{ . }} retrieves cookies by host.'
+FUNC_COMMENT='{{ . }} retrieves cookies like the host.'
 xo query $SQDB \
   --type Cookie \
-  --func CookiesByHost \
+  --func CookiesLikeHost \
   --func-comment="$FUNC_COMMENT" \
   --fields="$FIELDS" \
   --trim \

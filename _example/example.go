@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -13,19 +14,25 @@ import (
 
 func main() {
 	file := flag.String("file", "/home/"+os.Getenv("USER")+"/.config/vivaldi/Default/Cookies", "file")
+	host := flag.String("host", "", "host")
 	flag.Parse()
-	if err := run(*file); err != nil {
+	if err := run(*file, *host); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(file string) error {
-	cookies, err := ccookies.Read(file, "sketchfab.com")
+func run(file, host string) error {
+	cookies, err := ccookies.Read(file, host)
 	if err != nil {
 		return err
 	}
 	for i, cookie := range cookies {
-		log.Printf("cookie %d: %+v", i, cookie)
+		fmt.Printf("%d:\n", i)
+		fmt.Printf("  domain: %s\n", cookie.Domain)
+		fmt.Printf("  name: %q\n", cookie.Name)
+		fmt.Printf("  expires: %q\n", cookie.Expires)
+		fmt.Printf("  path: %q\n", cookie.Path)
+		fmt.Printf("  value: %q\n", cookie.Value)
 	}
 	return nil
 }

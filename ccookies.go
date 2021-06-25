@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/kenshaw/ccookies/models"
 )
@@ -52,30 +53,17 @@ func Read(file, host string) ([]*http.Cookie, error) {
 		return nil, err
 	}
 	defer db.Close()
-	// determine model
+	// determine retrieval
 	f := models.Cookies
 	if host != "" {
-		f = models.CookiesByHost
+		f, host = models.CookiesLikeHost, "%"+strings.TrimPrefix(host, "%")
 	}
-	// read the cookies
+	// read and convert
 	res, err := f(context.Background(), db, host)
 	if err != nil {
 		return nil, err
 	}
-	var cookies []*http.Cookie
-	for _, c := range res {
-		cookies = append(cookies, &http.Cookie{
-			Name:     c.Name,
-			Value:    c.EncryptedValue.String(),
-			Path:     c.Path,
-			Domain:   c.HostKey,
-			Expires:  c.ExpiresUTC.Time(),
-			Secure:   c.IsSecure,
-			HttpOnly: c.IsHTTPOnly,
-			// SameSite: c.SameSite,
-		})
-	}
-	return cookies, nil
+	return models.Convert(res), nil
 }
 
 // driverName returns the first sqlite3 driver name it encounters.
