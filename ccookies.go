@@ -11,9 +11,12 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"strings"
 
 	"github.com/kenshaw/ccookies/models"
+	"golang.org/x/net/publicsuffix"
 )
 
 /*
@@ -64,6 +67,29 @@ func Read(file, host string) ([]*http.Cookie, error) {
 		return nil, err
 	}
 	return models.Convert(res), nil
+}
+
+// ReadCookieJar reads the cookies from the provided sqlite3 file for the
+// provided url, returning a cookie jar usable with http.Client.
+func ReadCookieJar(file, urlstr string) (http.CookieJar, error) {
+	// read cookies for url host
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return nil, err
+	}
+	cookies, err := Read(file, u.Host)
+	if err != nil {
+		return nil, err
+	}
+	// build jar
+	jar, err := cookiejar.New(&cookiejar.Options{
+		PublicSuffixList: publicsuffix.List,
+	})
+	if err != nil {
+		return nil, err
+	}
+	jar.SetCookies(u, cookies)
+	return jar, nil
 }
 
 // driverName returns the first sqlite3 driver name it encounters.
