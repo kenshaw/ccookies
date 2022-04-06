@@ -96,7 +96,9 @@ func ReadJar(file, urlstr string) (http.CookieJar, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https" {
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "ws", "wss":
+	default:
 		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
 	}
 	cookies, err := Read(file, u.Host)
@@ -115,7 +117,9 @@ func ReadJarFiltered(file, urlstr string, f func(*http.Cookie) bool) (http.Cooki
 	if err != nil {
 		return nil, err
 	}
-	if strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https" {
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "ws", "wss":
+	default:
 		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
 	}
 	cookies, err := Read(file, u.Host)
