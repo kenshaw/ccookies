@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -95,6 +96,9 @@ func ReadJar(file, urlstr string) (http.CookieJar, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https" {
+		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
+	}
 	cookies, err := Read(file, u.Host)
 	if err != nil {
 		return nil, err
@@ -110,6 +114,9 @@ func ReadJarFiltered(file, urlstr string, f func(*http.Cookie) bool) (http.Cooki
 	u, err := url.Parse(urlstr)
 	if err != nil {
 		return nil, err
+	}
+	if strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https" {
+		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
 	}
 	cookies, err := Read(file, u.Host)
 	if err != nil {
