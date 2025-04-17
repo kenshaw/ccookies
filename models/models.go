@@ -14,9 +14,9 @@ import (
 
 var (
 	// logf is used by generated code to log SQL queries.
-	logf = func(string, ...interface{}) {}
+	logf = func(string, ...any) {}
 	// errf is used by generated code to log SQL errors.
-	errf = func(string, ...interface{}) {}
+	errf = func(string, ...any) {}
 )
 
 // logerror logs the error and returns it.
@@ -26,47 +26,45 @@ func logerror(err error) error {
 }
 
 // Logf logs a message using the package logger.
-func Logf(s string, v ...interface{}) {
+func Logf(s string, v ...any) {
 	logf(s, v...)
 }
 
 // SetLogger sets the package logger. Valid logger types:
 //
-//     io.Writer
-//     func(string, ...interface{}) (int, error) // fmt.Printf
-//     func(string, ...interface{}) // log.Printf
-//
-func SetLogger(logger interface{}) {
+//	io.Writer
+//	func(string, ...interface{}) (int, error) // fmt.Printf
+//	func(string, ...interface{}) // log.Printf
+func SetLogger(logger any) {
 	logf = convLogger(logger)
 }
 
 // Errorf logs an error message using the package error logger.
-func Errorf(s string, v ...interface{}) {
+func Errorf(s string, v ...any) {
 	errf(s, v...)
 }
 
 // SetErrorLogger sets the package error logger. Valid logger types:
 //
-//     io.Writer
-//     func(string, ...interface{}) (int, error) // fmt.Printf
-//     func(string, ...interface{}) // log.Printf
-//
-func SetErrorLogger(logger interface{}) {
+//	io.Writer
+//	func(string, ...interface{}) (int, error) // fmt.Printf
+//	func(string, ...interface{}) // log.Printf
+func SetErrorLogger(logger any) {
 	errf = convLogger(logger)
 }
 
 // convLogger converts logger to the standard logger interface.
-func convLogger(logger interface{}) func(string, ...interface{}) {
+func convLogger(logger any) func(string, ...any) {
 	switch z := logger.(type) {
 	case io.Writer:
-		return func(s string, v ...interface{}) {
+		return func(s string, v ...any) {
 			fmt.Fprintf(z, s, v...)
 		}
-	case func(string, ...interface{}) (int, error): // fmt.Printf
-		return func(s string, v ...interface{}) {
+	case func(string, ...any) (int, error): // fmt.Printf
+		return func(s string, v ...any) {
 			_, _ = z(s, v...)
 		}
-	case func(string, ...interface{}): // log.Printf
+	case func(string, ...any): // log.Printf
 		return z
 	}
 	panic(fmt.Sprintf("unsupported logger type %T", logger))
@@ -77,9 +75,9 @@ func convLogger(logger interface{}) func(string, ...interface{}) {
 //
 // This works with both database/sql.DB and database/sql.Tx.
 type DB interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // Error is an error.
@@ -185,7 +183,7 @@ func (t Time) Value() (driver.Value, error) {
 }
 
 // Scan satisfies the sql.Scanner interface.
-func (t *Time) Scan(v interface{}) error {
+func (t *Time) Scan(v any) error {
 	switch x := v.(type) {
 	case time.Time:
 		t.time = x

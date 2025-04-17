@@ -42,7 +42,7 @@ func (v ExpiresUTC) Time() time.Time {
 }
 
 // Scan satisfies the sql.Scanner interface.
-func (v *ExpiresUTC) Scan(z interface{}) error {
+func (v *ExpiresUTC) Scan(z any) error {
 	var i int64
 	switch x := z.(type) {
 	case int64:
@@ -78,7 +78,7 @@ func (v EncryptedValue) Bytes() []byte {
 }
 
 // Scan satisfies the sql.Scanner interface.
-func (v *EncryptedValue) Scan(z interface{}) error {
+func (v *EncryptedValue) Scan(z any) error {
 	buf, ok := z.([]byte)
 	switch {
 	case !ok:
