@@ -44,8 +44,8 @@ CREATE TABLE cookies(
 )
 */
 
-// ReadContext reads the cookies from the provided sqlite3 file on disk.
-func ReadContext(ctx context.Context, file, host string) ([]*http.Cookie, error) {
+// Read reads the cookies from the provided sqlite3 file on disk.
+func Read(ctx context.Context, file, host string) ([]*http.Cookie, error) {
 	// check sqlite driver
 	driver := driverName()
 	if driver == "" {
@@ -70,11 +70,6 @@ func ReadContext(ctx context.Context, file, host string) ([]*http.Cookie, error)
 	return models.Convert(res), nil
 }
 
-// Read reads the cookies from the provided sqlite3 file on disk.
-func Read(file, host string) ([]*http.Cookie, error) {
-	return ReadContext(context.Background(), file, host)
-}
-
 // Jar builds a cookie jar for the url from provided cookies.
 func Jar(u *url.URL, cookies ...*http.Cookie) (http.CookieJar, error) {
 	// build jar
@@ -90,7 +85,7 @@ func Jar(u *url.URL, cookies ...*http.Cookie) (http.CookieJar, error) {
 
 // ReadJar reads the cookies from the provided sqlite3 file for the provided
 // url into a cookie jar usable with http.Client.
-func ReadJar(file, urlstr string) (http.CookieJar, error) {
+func ReadJar(ctx context.Context, file, urlstr string) (http.CookieJar, error) {
 	// read cookies
 	u, err := url.Parse(urlstr)
 	if err != nil {
@@ -101,7 +96,7 @@ func ReadJar(file, urlstr string) (http.CookieJar, error) {
 	default:
 		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
 	}
-	cookies, err := Read(file, u.Host)
+	cookies, err := Read(ctx, file, u.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +106,7 @@ func ReadJar(file, urlstr string) (http.CookieJar, error) {
 // ReadJarFiltered reads the cookies from the provided sqlite3 file for the
 // provided url into a cookie jar (usable with http.Client) consisting of of
 // cookies passed through filter func f.
-func ReadJarFiltered(file, urlstr string, f func(*http.Cookie) bool) (http.CookieJar, error) {
+func ReadJarFiltered(ctx context.Context, file, urlstr string, f func(*http.Cookie) bool) (http.CookieJar, error) {
 	// read cookies
 	u, err := url.Parse(urlstr)
 	if err != nil {
@@ -122,7 +117,7 @@ func ReadJarFiltered(file, urlstr string, f func(*http.Cookie) bool) (http.Cooki
 	default:
 		return nil, fmt.Errorf("invalid url scheme %q", u.Scheme)
 	}
-	cookies, err := Read(file, u.Host)
+	cookies, err := Read(ctx, file, u.Host)
 	if err != nil {
 		return nil, err
 	}
