@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -16,13 +17,13 @@ func main() {
 	file := flag.String("file", "/home/"+os.Getenv("USER")+"/.config/vivaldi/Default/Cookies", "file")
 	host := flag.String("host", "", "host")
 	flag.Parse()
-	if err := run(*file, *host); err != nil {
+	if err := run(context.Background(), *file, *host); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(file, host string) error {
-	cookies, err := ccookies.Read(file, host)
+func run(ctx context.Context, file, host string) error {
+	cookies, err := ccookies.Read(ctx, file, host)
 	if err != nil {
 		return err
 	}
